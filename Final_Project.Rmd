@@ -36,17 +36,7 @@ library(rpart.plot)
 ```
  
 
-
-
-## Load data and perform data cleaning
-
-Please delete all "notes" before submission.
-
-Note: CSV/data files should be read assuming they are in the `data` folder. In
-other words, load data via `read_csv("data/CSV_NAME.csv")` and not via
-`read_csv("/Users/aykim/Documents/MATH495/Final_Project/data/CSV_NAME.csv")`
-
-#Load data and data cleaningfor kNN
+##Load data and data cleaningfor kNN
 ```{r, message=FALSE, warning=FALSE, fig.width=8, fig.height=4.5, echo=FALSE}
 expediatrain <- read_csv("~/Final_Project/data/expediatrain.csv")
 test_2 <- read_csv("~/Final_Project/data/test-2.csv")
@@ -54,7 +44,7 @@ test_2 <- read_csv("~/Final_Project/data/test-2.csv")
 Trainset <- filter(expediatrain , is_booking == 1 )
 ```
 
-#Load data and data cleaning for CART
+##Load data and data cleaning for CART
 ```{r load_data, message=FALSE, warning=FALSE, echo=FALSE}
 train<-read_csv("~/Final_Project/data/expediatrain.csv")
 train<-filter(train, train$is_booking==1)
@@ -193,7 +183,7 @@ summary(aovdiff)
 Note: Hardcode your crossvalidation here i.e. do not use built-in crossvalidation
 options.
 
-#Crossvalidation for kNN 
+##Crossvalidation for kNN 
 
 ```{r, warning=FALSE, echo=FALSE}
  
@@ -232,7 +222,7 @@ for(i in 1:length(k_vector)){
 }
 ```
 
-#Crossvalidation for CART 
+##Crossvalidation for CART 
 ```{r formula, message=FALSE, warning=FALSE, echo=FALSE}
 popmodelfom<-as.formula(V2~is_package+posa_continent+logdiff)
 ```
@@ -294,7 +284,7 @@ Note: Output a CSV using `write_csv(DATAFRAME_NAME, path="data/SUBMISSION_NAME.c
 that is Kaggle submitable. This submission should return a Kaggle score that is
 close to your crossvalidated score.
 
-#submission of kNN
+##submission of kNN
 ```{r, warning=FALSE, echo=FALSE}
 
 k <- 5
@@ -318,7 +308,7 @@ colnames(submission1) <- c("id","hotel_cluster")
 write_csv(submission1, "submission.csv")
 ```
 
-#Final model for CART 
+##Final model for CART 
 
 ```{r cart plotting, message=FALSE, warning=FALSE, fig.width=8, fig.height=4.5, echo=FALSE}
 tree<-rpart(popmodelfom, data = Dates, method="class",control = rpart.control(cp =0))
@@ -426,7 +416,7 @@ levels(tempyhat)
 
 ```
 
-#submission for CART
+##submission for CART
 ```{r submission_filing, message=FALSE, warning=FALSE, echo=FALSE}
 submission<-cbind.data.frame(sample_submission$id, tempyhat)
 colnames(submission)[1]<-"id"
