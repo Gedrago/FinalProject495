@@ -1,0 +1,463 @@
+---
+title: "Final Project"
+author: "Wayne Maumbe, Meron Gedrago"
+date: "December 22, 2017"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    df_print: kable
+---
+
+## Load all packages
+
+```{r, message=FALSE, warning=FALSE, fig.width=8, fig.height=4.5, echo=FALSE}
+library(dplyr)
+library(cluster)
+library(class)
+library(dplyr)
+library(cluster)
+library(knitr)
+library(rpart)
+library(caret)
+library(MLmetrics)
+library(MASS)
+library(knncat)
+library(readr)
+library(tictoc)
+library(tidyverse)
+library(data.table)
+library(gridExtra)
+library(rpart.plot)
+
+```
+ 
+
+
+
+## Load data and perform data cleaning
+
+Please delete all "notes" before submission.
+
+Note: CSV/data files should be read assuming they are in the `data` folder. In
+other words, load data via `read_csv("data/CSV_NAME.csv")` and not via
+`read_csv("/Users/aykim/Documents/MATH495/Final_Project/data/CSV_NAME.csv")`
+
+#Load data and data cleaningfor kNN
+```{r, message=FALSE, warning=FALSE, fig.width=8, fig.height=4.5, echo=FALSE}
+expediatrain <- read_csv("~/Final_Project/data/expediatrain.csv")
+test_2 <- read_csv("~/Final_Project/data/test-2.csv")
+#we are filtering the train by booking since the test dataset only contains information of booked hotel searches 
+Trainset <- filter(expediatrain , is_booking == 1 )
+```
+
+#Load data and data cleaning for CART
+```{r load_data, message=FALSE, warning=FALSE, echo=FALSE}
+train<-read_csv("~/Final_Project/data/expediatrain.csv")
+train<-filter(train, train$is_booking==1)
+```
+
+```{r set_vartypes, message=FALSE, warning=FALSE, echo=FALSE}
+#set variables to reflect appropriate variable type as described in Kaggle
+train$site_name<-as.factor(train$site_name)
+train$posa_continent<-as.factor(train$posa_continent)
+train$user_location_country<-as.factor(train$user_location_country)
+train$user_location_region<-as.factor(train$user_location_region)
+train$user_location_city<-as.factor(train$user_location_city)
+train$is_mobile<-as.factor(train$is_booking)
+train$is_package<-as.factor(train$is_package)
+train$channel<-as.factor(train$channel)
+train$srch_destination_id<-as.factor(train$srch_destination_id)
+train$srch_destination_type_id<-as.factor(train$srch_destination_type_id)
+train$is_booking<-as.factor(train$is_booking)
+train$hotel_continent<-as.factor(train$hotel_continent)
+train$hotel_country<-as.factor(train$hotel_country)
+train$hotel_market<-as.factor(train$hotel_market)
+train$hotel_cluster<-as.factor(train$hotel_cluster)
+train$srch_ci<-as.Date(train$srch_ci)
+train$srch_co<-as.Date(train$srch_co)
+```
+
+```{r shrinkage, message=FALSE, warning=FALSE, fig.width=8, fig.height=4.5, echo=FALSE}
+#condense the 100 levels of hotel clusters to 9 popularity levels  
+Summaryclusters<-tally(group_by(train,hotel_cluster))
+Shrink<-mutate(Summaryclusters, popularity=c(1:dim(Summaryclusters)[[1]]))
+#define limits for each popularity level
+for( i in 1:dim(Shrink)[[1]]){
+if (Shrink$n[i]<=20 && Shrink$n>0) {
+  Shrink$popularity[i]<-"1"
+}
+if (Shrink$n[i]<= 40&& Shrink$n[i]>20) {
+  Shrink$popularity[i]<-"2"
+}
+  if (Shrink$n[i]<=60 && Shrink$n[i]>40) {
+  Shrink$popularity[i]<-"3"
+  }
+  if (Shrink$n[i]<= 80 && Shrink$n[i]>60) {
+  Shrink$popularity[i]<-"4"
+  }
+  if (Shrink$n[i]<= 100 && Shrink$n[i]>80) {
+  Shrink$popularity[i]<-"5"
+  }
+  if (Shrink$n[i]<= 115&& Shrink$n[i]>100) {
+  Shrink$popularity[i]<-"6"
+  }
+  if (Shrink$n[i]<= 140&& Shrink$n[i]>115) {
+  Shrink$popularity[i]<-"7"
+  }
+  if (Shrink$n[i]<= 160&& Shrink$n[i]>140) {
+  Shrink$popularity[i]<-"8"
+  }
+  if (Shrink$n[i]>160) {
+  Shrink$popularity[i]<-"9"
+  }
+  
+}
+#assign to every point of hotel cluster the corresponding popularity level
+train<-mutate(train, popularity=c(1:dim(train)[[1]]))
+for (j in 1:dim(Shrink)[[1]]) {
+ for (i in which(train$hotel_cluster==Shrink$hotel_cluster[j])) {
+   train$popularity[i]<-Shrink$popularity[j]
+  } 
+}
+ #download and rename dataset for ease of plotting and data handling for shiny app
+write_csv(train,"trainpop.csv")
+trainpop<-train
+```
+
+```{r date_calc, message=FALSE, warning=FALSE, echo=FALSE}
+#calculate and append length of stay 
+train$popularity<-as.factor(train$popularity)
+train<-mutate( train, date_diff=c(1:dim(train)[[1]]))
+train$date_diff <- train$srch_co- train$srch_ci
+train$date_diff<-as.numeric(train$date_diff)
+```
+
+```{r date_cleaning, message=FALSE, warning=FALSE, echo=FALSE}
+#create seperate Date dataframe with only complete cases to allow for usage in anova methods
+Dates<-as.data.frame(cbind(train$date_diff, train$popularity))
+Summarydate<-tally(group_by(Dates,train$date_diff))
+Dates<-mutate(Dates, is_package=trainpop$is_package)
+Dates<-mutate(Dates, is_booking=trainpop$is_booking)
+Dates<-mutate(Dates, hotel_continent=trainpop$hotel_continent)
+Dates<-mutate(Dates, hotel_location=trainpop$hotel_country)
+Dates<-mutate(Dates, posa_continent=trainpop$posa_continent)
+indx<-c(which(train$date_diff<0))
+Dates<-Dates[-indx,]
+Dates<-Dates[complete.cases(Dates), ]
+Summarydate<-tally(group_by(Dates,Dates$V1))
+Dates$V2<-as.factor(Dates$V2)
+Dates<-mutate(Dates, logdiff=log(Dates$V1))
+levels(Dates$posa_continent)[1]<-"Africa"
+levels(Dates$posa_continent)[2]<-"Europe"
+levels(Dates$posa_continent)[3]<-"N.America"
+levels(Dates$posa_continent)[4]<-"S.America"
+levels(Dates$posa_continent)[5]<-"Asia"
+levels(Dates$is_package)[1]<-"No"
+levels(Dates$is_package)[2]<-"Yes"
+Dates[-which(Dates$logdiff==Inf)] = NA
+Datesnaless<-Dates[-which(Dates$logdiff==-Inf),]
+Datesnaless<-Datesnaless[complete.cases(Datesnaless),]
+```
+
+
+
+## EDA visualizations and tables
+
+Note: If you had to illustrate using no modelling but only graphs and tables which
+variables have the most predictive power, which would you include?
+
+* Perform a cross-validation on only the final/ultimate model used for your
+submission.
+* The "score" in question should be the same as used to compute the Kaggle
+leaderboard. In other words, your estimated score should be roughly equal to the
+score returned by Kaggle after your submission.
+
+```{r hue_plus_outcome_plot, message=FALSE, warning=FALSE, fig.width=8, fig.height=4.5, echo=FALSE}
+#plot of the outcome variable as-is with color showing shrinkage scheme
+cols <- c("9" = "#5C0E0E", "6" = "red2", "5" = "red", "2" = "lightpink","4" = "#FF1F1F","3" = "#FC4545", "7" = "#CE0B0B","8" = "#8B0000","1" = "#F6CACA")
+ggplot(Shrink, aes(x=hotel_cluster, y=n, color=popularity))+geom_point(position = "dodge")+ xlab("hotel cluster") +ylab("number of searches")+scale_color_manual("hotel popularity levels", values = cols)+theme(axis.text.x = element_text(angle = 90, size = 4))+ theme(legend.title.align=9 ,panel.background = element_rect(fill = NA),panel.grid.major = element_line(colour = "grey90"))
+```
+
+```{r anova, message=FALSE, warning=FALSE}
+#anova analysis of predictor variables 
+aovdiff<-aov(lm(logdiff~is_package+V2+posa_continent+is_package:V2+is_package:posa_continent+is_package:V2:posa_continent, data = Datesnaless,na.action=na.exclude))
+summary(aovdiff)
+```
+
+## Crossvalidation of ultimate model
+
+Note: Hardcode your crossvalidation here i.e. do not use built-in crossvalidation
+options.
+
+#Crossvalidation for kNN 
+
+```{r, warning=FALSE, echo=FALSE}
+ 
+# Consider a range of k values.  
+k_vector <- c(1,3,5,7,9,11,13,15)
+ 
+# Save results here
+results <- data_frame(
+  k_value = k_vector,
+  MAPK = 0
+)
+for(i in 1:length(k_vector)){
+  for(j in 1:5){
+    # Set up training & validation (AKA "pretend" test) set based on folds
+    train_set <- train_subset %>% 
+      sample_frac(.2*j)
+    validation_set <- anti_join(train_subset,train_set)
+  
+    
+    # Fit model
+    model_formula12 <- as.formula(hotel_cluster ~ is_package + hotel_continent +          hotel_market +  hotel_country )
+    model  <-  knn3(model_formula12, data=train_set, k = k_vector[i], use.all = TRUE)
+ 
+
+    # Get predictions
+      predictions <- predict(model, newdata =validation_set)  %>%
+      as_tibble() %>% 
+      pull(y)
+    
+    # Compute MSE and save
+    results$MAPK[i] <- validation_set %>% 
+      mutate(yhat = predictions) %>% 
+      summarise(MAPK = mapk(5,validation_set$hotel_cluster,validation_set$yhat)) %>% 
+      pull(MAPK)
+  }
+}
+```
+
+#Crossvalidation for CART 
+```{r formula, message=FALSE, warning=FALSE, echo=FALSE}
+popmodelfom<-as.formula(V2~is_package+posa_continent+logdiff)
+```
+
+```{r cv, message=FALSE, warning=FALSE}
+#cross validation scheme
+traincv <- Datesnaless%>% 
+  sample_frac(1) %>% 
+  mutate(fold = rep(1:10, length=n()))
+# Consider a range of complexity parameters. this was chosen by trial and error
+counter<-1:10
+cp_vector <-c(0,0.000001*counter)
+counter<-1:11
+# Save results here
+results <- data_frame(
+  cp = cp_vector,
+  score = 25235542 #place holder
+)
+for(i in counter){
+  for(j in 1:10){
+    # Set up training & validation (AKA "pretend" test) set based on folds
+   
+    train_set <- traincv %>% 
+      filter(fold == j)
+    validation_set <- traincv %>% 
+      filter(fold !=j)
+    
+    # Fit model
+    model <- rpart(popmodelfom, data =train_set,method="class", control = rpart.control(cp=cp_vector[[i]]))
+    # Get predictions
+    y_hat_model <- model %>% 
+    predict(type="class",newdata=validation_set)
+    
+    # Score/error
+    
+    # results$score[i]<-Metrics::mapk(5, validation_set$popularity, y_hat) 
+    #for the cv analysis we employ accuracy to obtain score instead of required mapk
+    results$score[i]<-MLmetrics::Accuracy(y_true = validation_set$V2, y_pred = y_hat_model)
+    }
+}
+optimal <- results %>% 
+  arrange(score) %>% 
+  slice(1)
+optimal %>% 
+  kable(digits=3)
+cp_star <- optimal$cp
+score_star <- optimal$score
+ggplot(results, aes(x=cp, y=score)) +
+  geom_point() +
+  labs(x="complexity parameter", y="score", title="Crossvalidation estimates of Accuracy for CART model") +  geom_vline(xintercept = cp_star, col="red")
+```
+
+
+ 
+
+## Create submission
+
+Note: Output a CSV using `write_csv(DATAFRAME_NAME, path="data/SUBMISSION_NAME.csv")`
+that is Kaggle submitable. This submission should return a Kaggle score that is
+close to your crossvalidated score.
+
+#submission of kNN
+```{r, warning=FALSE, echo=FALSE}
+
+k <- 5
+#subsetting the Trainset because there were too many ties when predicting using knn
+train_subset <- Trainset %>% 
+    slice(1:10000)
+
+model_formula12 <- as.formula(hotel_cluster ~ is_package + hotel_continent + hotel_market +  hotel_country )
+model_knn12 <-  knn3(model_formula12, data=train_subset, k = k, use.all = TRUE)
+#find the probabilities also 
+ 
+predictedvalues <- predict(model_knn12, newdata =  test_2)
+ 
+
+ predictedclusters <- colnames(predictedvalues)[max.col(predictedvalues,ties.method="first")] 
+
+predicted_clusters <- as.data.frame(predictedclusters)
+ 
+submission1 <-  cbind(test_2$id ,predicted_clusters)
+colnames(submission1) <- c("id","hotel_cluster")
+write_csv(submission1, "submission.csv")
+```
+
+#Final model for CART 
+
+```{r cart plotting, message=FALSE, warning=FALSE, fig.width=8, fig.height=4.5, echo=FALSE}
+tree<-rpart(popmodelfom, data = Dates, method="class",control = rpart.control(cp =0))
+bestcp <- tree$cptable[which.min(tree$cptable[,"xerror"]),"CP"]
+tree.cv<-rpart(popmodelfom, data = Datesnaless, method="class",control = rpart.control(cp = bestcp, maxdepth = 5))
+tree.pruned <- prune(tree.cv, cp = bestcp)
+#rpart.plot::prp(tree.cv, varlen=0 ,faclen=0 , cex = 0.8, extra = 100, type = 1,uniform=T, branch=0, yesno=T)
+#plot of tree showing pruned version of model 
+rpart.plot::prp(tree.pruned,  varlen=0 ,faclen = 0, type=1, cex = 0.8,extra=100,uniform=T, branch=0, yesno=T)
+```
+
+```{r load_test_data,message=FALSE,warning=FALSE, echo=FALSE}
+testexpedia<-read.csv("~/Advanced Data Analysis/Rstudio and Git projects/Final_Project/data/test.csv")
+
+```
+
+
+```{r test_data_cleaning,message=FALSE,warning=FALSE, echo=FALSE}
+testexpedia$site_name<-as.factor(testexpedia$site_name)
+testexpedia$posa_continent<-as.factor(testexpedia$posa_continent)
+testexpedia$user_location_country<-as.factor(testexpedia$user_location_country)
+testexpedia$user_location_region<-as.factor(testexpedia$user_location_region)
+testexpedia$user_location_city<-as.factor(testexpedia$user_location_city)
+testexpedia$is_mobile<-as.factor(testexpedia$is_mobile)
+testexpedia$is_package<-as.factor(testexpedia$is_package)
+testexpedia$channel<-as.factor(testexpedia$channel)
+testexpedia$srch_destination_id<-as.factor(testexpedia$srch_destination_id)
+testexpedia$srch_destination_type_id<-as.factor(testexpedia$srch_destination_type_id)
+testexpedia$hotel_continent<-as.factor(testexpedia$hotel_continent)
+testexpedia$hotel_country<-as.factor(testexpedia$hotel_country)
+testexpedia$hotel_market<-as.factor(testexpedia$hotel_market)
+testexpedia$srch_ci<-as.Date(testexpedia$srch_ci)
+testexpedia$srch_co<-as.Date(testexpedia$srch_co)
+testexpedia<-mutate( testexpedia, date_diff=c(1:dim(testexpedia)[[1]]))
+testexpedia$date_diff <- testexpedia$srch_co- testexpedia$srch_ci
+testexpedia$date_diff<-as.numeric(testexpedia$date_diff)
+Dates<-as.data.frame(cbind(testexpedia$date_diff, testexpedia$popularity))
+Summarydate<-tally(group_by(Dates,testexpedia$date_diff))
+Dates<-mutate(Dates, is_package=testexpedia$is_package)
+Dates<-mutate(Dates, hotel_continent=testexpedia$hotel_continent)
+Dates<-mutate(Dates, posa_continent=testexpedia$posa_continent)
+Summarydate<-tally(group_by(Dates,Dates$V1))
+Dates<-mutate(Dates, logdiff=log(Dates$V1))
+levels(Dates$is_package)[1]<-"No"
+levels(Dates$is_package)[2]<-"Yes"
+```
+```{r test fitting, message=FALSE, warning=FALSE, echo=TRUE}
+y_hat <- tree.cv %>% 
+  predict(newdata=Dates, type="class")
+```
+```{r expand_scheme, message=FALSE,warning=FALSE, echo=FALSE}
+propodata<-cbind.data.frame(trainpop$hotel_cluster, trainpop$popularity)
+pop1<-filter(propodata,trainpop$popularity==1)
+pop1weight<-tally(group_by(pop1,`trainpop$hotel_cluster`))%>%
+  as_tibble() 
+pop1weight$n<-pop1weight$n/sum(pop1weight$n)
+pop2<-filter(propodata,trainpop$popularity==2)
+pop2weight<-tally(group_by(pop2,`trainpop$hotel_cluster`))%>%
+  as_tibble() 
+pop2weight$n<-pop2weight$n/sum(pop2weight$n)
+pop3<-filter(propodata,trainpop$popularity==3)
+pop3weight<-tally(group_by(pop3,`trainpop$hotel_cluster`))%>%
+  as_tibble() 
+pop3weight$n<-pop3weight$n/sum(pop3weight$n)
+pop4<-filter(propodata,trainpop$popularity==4)
+pop4weight<-tally(group_by(pop4,`trainpop$hotel_cluster`))%>%
+  as_tibble() 
+pop4weight$n<-pop4weight$n/sum(pop4weight$n)
+pop5<-filter(propodata,trainpop$popularity==5)
+pop5weight<-tally(group_by(pop5,`trainpop$hotel_cluster`))%>%
+  as_tibble() 
+pop5weight$n<-pop5weight$n/sum(pop5weight$n)
+pop6<-filter(propodata,trainpop$popularity==6)
+pop6weight<-tally(group_by(pop6,`trainpop$hotel_cluster`))%>%
+  as_tibble() 
+pop6weight$n<-pop6weight$n/sum(pop6weight$n)
+pop7<-filter(propodata,trainpop$popularity==7)
+pop7weight<-tally(group_by(pop7,`trainpop$hotel_cluster`))%>%
+  as_tibble() 
+pop7weight$n<-pop7weight$n/sum(pop7weight$n)
+pop8<-filter(propodata,trainpop$popularity==8)
+pop8weight<-tally(group_by(pop8,`trainpop$hotel_cluster`))%>%
+  as_tibble() 
+pop8weight$n<-pop8weight$n/sum(pop8weight$n)
+pop9<-filter(propodata,trainpop$popularity==9)
+pop9weight<-tally(group_by(pop9,`trainpop$hotel_cluster`))%>%
+  as_tibble() 
+pop9weight$n<-pop9weight$n/sum(pop9weight$n)
+levels(y_hat)
+tempy_hat<-as.numeric(y_hat)
+```
+```{r expand, warning=FALSE, echo=FALSE}
+set.seed(1509)
+lvlyhat<-unique(tempy_hat)
+yhat<-tempy_hat
+for (i in 1:length(tempy_hat)) {
+yhat[[i]]<-replace(yhat[[i]],yhat[[i]]==lvlyhat[[2]],as.numeric(sample(pop8weight$`trainpop$hotel_cluster`, size=1, prob =pop8weight$n )))
+}
+for (i in 1:length(tempy_hat)) {
+yhat[[i]]<-replace(yhat[[i]],yhat[[i]]==lvlyhat[[1]],as.numeric(sample(pop9weight$`trainpop$hotel_cluster`, size=1, prob =pop9weight$n )))
+}
+unique(yhat)
+tempyhat<-as.factor(yhat)
+levels(tempyhat)
+
+```
+
+#submission for CART
+```{r submission_filing, message=FALSE, warning=FALSE, echo=FALSE}
+submission<-cbind.data.frame(sample_submission$id, tempyhat)
+colnames(submission)[1]<-"id"
+colnames(submission)[2]<-"hotel_cluster"
+write_csv(submission, "submission1.csv")
+```
+
+
+
+## Citations and references
+
+Note: All citations and references must be included here.
+
+
+
+## Supplementary materials
+
+Note: Anything else you've tried that you'd like to include, but isn't essential to
+the above, like other EDA's, other modeling approaches you've tried, etc. Please
+set the R code chunk `eval=FALSE` here so that default is that R Markdown
+doesn't run the code, but a user can flip this switch if they are curious.
+
+```{r, eval=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=4.5, echo=FALSE}
+
+
+```
+
+
+
+ 
+ 
+
+
+
